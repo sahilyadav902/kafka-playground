@@ -1,0 +1,323 @@
+{
+  "info": {
+    "name": "Kafka Playground",
+    "description": "Complete Kafka feature test collection. Start docker-compose and Spring Boot app first.\nBase URL: http://localhost:8081",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8081", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Orders",
+      "item": [
+        {
+          "name": "Send Order (No Key - Round Robin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/orders",
+            "body": { "mode": "raw", "raw": "{\n  \"orderId\": \"order-001\",\n  \"userId\": \"user-123\",\n  \"item\": \"MacBook Pro\",\n  \"total\": 2499.99,\n  \"status\": \"PLACED\"\n}" },
+            "description": "Sends an order without a key. Kafka distributes across partitions using round-robin. No ordering guarantee."
+          }
+        },
+        {
+          "name": "Send Keyed Order (Ordering Guarantee)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/orders/keyed",
+            "body": { "mode": "raw", "raw": "{\n  \"orderId\": \"order-002\",\n  \"userId\": \"user-123\",\n  \"item\": \"iPhone 15\",\n  \"total\": 999.99,\n  \"status\": \"PLACED\"\n}" },
+            "description": "Uses userId as the Kafka message key. All orders for user-123 always go to the same partition = strict ordering per user."
+          }
+        },
+        {
+          "name": "Send Order to Specific Partition",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/orders/partition/1",
+            "body": { "mode": "raw", "raw": "{\n  \"orderId\": \"order-003\",\n  \"userId\": \"user-456\",\n  \"item\": \"AirPods\",\n  \"total\": 249.99,\n  \"status\": \"PLACED\"\n}" },
+            "description": "Forces the message into partition 1. Useful for testing partition-specific consumers or debugging."
+          }
+        },
+        {
+          "name": "Send Order with Headers (Distributed Tracing)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/orders/headers",
+            "body": { "mode": "raw", "raw": "{\n  \"orderId\": \"order-004\",\n  \"userId\": \"user-789\",\n  \"item\": \"iPad\",\n  \"total\": 799.99,\n  \"status\": \"PLACED\"\n}" },
+            "description": "Attaches trace-id, source-service, and schema-version headers. Also note the 'produced-at' header injected automatically by ProducerAuditInterceptor."
+          }
+        },
+        {
+          "name": "Send Order Synchronously (Confirmed Delivery)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/orders/sync",
+            "body": { "mode": "raw", "raw": "{\n  \"orderId\": \"order-005\",\n  \"userId\": \"user-999\",\n  \"item\": \"Apple Watch\",\n  \"total\": 399.99,\n  \"status\": \"PLACED\"\n}" },
+            "description": "Blocks until the broker confirms the write. Response includes the exact partition and offset. Lower throughput but immediate confirmation."
+          }
+        },
+        {
+          "name": "Batch Send Orders (Throughput Test)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/kafka/orders/batch?count=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "kafka", "orders", "batch"],
+              "query": [{ "key": "count", "value": "20" }]
+            },
+            "description": "Sends N orders at once using 5 rotating userIds. Same userId always goes to same partition. Watch Kafka UI to see partition distribution."
+          }
+        },
+        {
+          "name": "Send Order Transactionally (Atomic Multi-Topic)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/orders/transactional",
+            "body": { "mode": "raw", "raw": "{\n  \"orderId\": \"order-txn-001\",\n  \"userId\": \"user-123\",\n  \"item\": \"MacBook Pro\",\n  \"total\": 2499.99,\n  \"status\": \"PLACED\"\n}" },
+            "description": "Atomically writes to BOTH 'orders' AND 'inventory-updates' topics in a single Kafka transaction. Either both writes are committed and visible to consumers, or neither is. Uses transactional.id for zombie fencing."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "Send Payment (Success)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/payments",
+            "body": { "mode": "raw", "raw": "{\n  \"txnId\": \"txn-001\",\n  \"from\": \"acc-A\",\n  \"to\": \"acc-B\",\n  \"amount\": 500.00,\n  \"currency\": \"USD\"\n}" },
+            "description": "Sends a payment event. Consumer processes it successfully and commits offset."
+          }
+        },
+        {
+          "name": "Send Payment (Triggers Retry + DLQ)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/payments",
+            "body": { "mode": "raw", "raw": "{\n  \"txnId\": \"txn-FAIL-001\",\n  \"from\": \"acc-X\",\n  \"to\": \"acc-Y\",\n  \"amount\": -100,\n  \"note\": \"FAIL\"\n}" },
+            "description": "The word FAIL triggers a RuntimeException. @RetryableTopic retries 3 times with exponential backoff (1s, 2s, 4s), then routes to payments-dlq automatically."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Notifications (Batch Consumer)",
+      "item": [
+        {
+          "name": "Send Notification",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/notifications",
+            "body": { "mode": "raw", "raw": "{\n  \"userId\": \"user-123\",\n  \"type\": \"ORDER_SHIPPED\",\n  \"message\": \"Your order has been shipped!\",\n  \"channel\": \"EMAIL\"\n}" },
+            "description": "Sends to notifications topic. The consumer uses a batch listener — processes up to 100 messages per poll, then commits the entire batch."
+          }
+        },
+        {
+          "name": "Send Multiple Notifications (Batch Demo)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/notifications",
+            "body": { "mode": "raw", "raw": "{\n  \"userId\": \"user-456\",\n  \"type\": \"PAYMENT_CONFIRMED\",\n  \"message\": \"Payment of $500 confirmed\",\n  \"channel\": \"SMS\"\n}" },
+            "description": "Send this multiple times quickly to see batch processing. Check logs — consumer logs 'Processing batch of N notifications'."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dead Letter Queue (DLQ)",
+      "item": [
+        {
+          "name": "Manually Send to DLQ",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/dlq",
+            "body": { "mode": "raw", "raw": "{\n  \"orderId\": \"bad-order-999\",\n  \"userId\": \"u1\",\n  \"total\": -999,\n  \"reason\": \"Negative total — validation failed\"\n}" },
+            "description": "Manually routes a message to orders-dlq with error metadata headers (original-topic, error-reason, retry-count). DLQ consumer logs the failure for ops review."
+          }
+        }
+      ]
+    },
+    {
+      "name": "User Profiles (Compacted Topic + Tombstone)",
+      "item": [
+        {
+          "name": "Create/Update User Profile",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/profiles",
+            "body": { "mode": "raw", "raw": "{\n  \"userId\": \"user-123\",\n  \"name\": \"Alice Smith\",\n  \"email\": \"alice@example.com\",\n  \"tier\": \"gold\"\n}" },
+            "description": "Sends to compacted topic with userId as key. Log compaction keeps only the LATEST value per key."
+          }
+        },
+        {
+          "name": "Update Same User (Compaction Demo)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/profiles",
+            "body": { "mode": "raw", "raw": "{\n  \"userId\": \"user-123\",\n  \"name\": \"Alice Smith\",\n  \"email\": \"alice.new@example.com\",\n  \"tier\": \"platinum\"\n}" },
+            "description": "Same userId as previous. After compaction, only this latest record survives."
+          }
+        },
+        {
+          "name": "Delete User Profile (Tombstone - GDPR)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/kafka/profiles/user-123",
+            "description": "Sends a tombstone (null value) for user-123's key to the compacted topic. During the next log compaction cycle, Kafka permanently deletes all records for this key. This is how you implement GDPR right-to-erasure in Kafka."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stock Prices (Ordering Per Key)",
+      "item": [
+        {
+          "name": "Send AAPL Price Update 1",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/stocks",
+            "body": { "mode": "raw", "raw": "{\n  \"symbol\": \"AAPL\",\n  \"price\": 182.50,\n  \"volume\": 1500000,\n  \"timestamp\": 1700000001\n}" },
+            "description": "Key = AAPL. All AAPL updates go to the same partition = strict price ordering for AAPL."
+          }
+        },
+        {
+          "name": "Send AAPL Price Update 2",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/stocks",
+            "body": { "mode": "raw", "raw": "{\n  \"symbol\": \"AAPL\",\n  \"price\": 183.10,\n  \"volume\": 2000000,\n  \"timestamp\": 1700000002\n}" },
+            "description": "Same key AAPL → same partition. Consumer sees these in exact order."
+          }
+        },
+        {
+          "name": "Send GOOG Price Update",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/stocks",
+            "body": { "mode": "raw", "raw": "{\n  \"symbol\": \"GOOG\",\n  \"price\": 140.20,\n  \"volume\": 800000,\n  \"timestamp\": 1700000001\n}" },
+            "description": "Different key GOOG → may go to a different partition. GOOG and AAPL are processed independently and in parallel."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Audit Events (Long-Retention Topic)",
+      "item": [
+        {
+          "name": "Send Audit Event",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/audit",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"USER_LOGIN\",\n  \"userId\": \"user-123\",\n  \"ip\": \"192.168.1.1\",\n  \"userAgent\": \"Mozilla/5.0\",\n  \"timestamp\": 1700000001\n}" },
+            "description": "Sends to audit-events topic which has 90-day retention. Used for compliance, forensics, and incident replay. Each event gets a UUID as the key."
+          }
+        },
+        {
+          "name": "Send Order Placed Audit",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/kafka/audit",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"ORDER_PLACED\",\n  \"userId\": \"user-123\",\n  \"orderId\": \"order-001\",\n  \"amount\": 2499.99,\n  \"timestamp\": 1700000002\n}" },
+            "description": "Audit trail for order placement. In a real system, this would be published automatically by the order service."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Consumer Pause / Resume",
+      "item": [
+        {
+          "name": "Pause Orders Consumer",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/kafka/consumers/orders-listener/pause",
+            "description": "Pauses the orders consumer. Kafka retains all messages — nothing is lost. Use this to simulate backpressure when a downstream system (DB, API) is overloaded."
+          }
+        },
+        {
+          "name": "Check Orders Consumer Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/kafka/consumers/orders-listener/status",
+            "description": "Returns whether the orders consumer is currently paused. Send some orders while paused and watch lag grow via Kafka UI."
+          }
+        },
+        {
+          "name": "Resume Orders Consumer",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/kafka/consumers/orders-listener/resume",
+            "description": "Resumes the paused orders consumer. It picks up exactly from where it left off — no messages skipped, no duplicates."
+          }
+        },
+        {
+          "name": "Pause Payments Consumer",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/kafka/consumers/payments-listener/pause",
+            "description": "Pauses the payments consumer. Available listener IDs: orders-listener, payments-listener, notifications-listener, dlq-listener, stocks-listener, audit-listener, inventory-listener"
+          }
+        },
+        {
+          "name": "Resume Payments Consumer",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/kafka/consumers/payments-listener/resume",
+            "description": "Resumes the payments consumer."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Consumer Monitoring",
+      "item": [
+        {
+          "name": "Get All Received Messages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/kafka/messages",
+            "description": "Returns all messages received by this app's consumers since startup (or last clear). Format: 'topic:offset:id'. Use this to verify your produce calls were consumed."
+          }
+        },
+        {
+          "name": "Clear Received Messages",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/kafka/messages",
+            "description": "Clears the in-memory received messages list. Use before a test run to get a clean slate."
+          }
+        }
+      ]
+    }
+  ]
+}
